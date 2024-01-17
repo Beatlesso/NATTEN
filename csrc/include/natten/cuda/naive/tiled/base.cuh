@@ -62,6 +62,7 @@ struct PointwiseNeighborhood2DBase {
 
     __device__ __host__ Params() {}
 
+    // CTOR without bias
     __device__ __host__ Params(
         scalar_t* query,
         scalar_t* key,
@@ -144,9 +145,12 @@ struct PointwiseNeighborhood2DBase {
       int batch_dim,
       int spatial_size,
       int attention_span) {
+    // KERNELTHREADS表示处理一个Kernel所需的线程数
     int KERNELTHREADS =
         min(CUDA_NUM_THREADS, attention_span /* == kernel_size^2 */);
+    // 表示一个线程块内最多可以同时处理几个Kernel，最多也只有spatial_size个Kernel要处理
     int PIXELTHREADS = min(int(CUDA_NUM_THREADS / KERNELTHREADS), spatial_size);
+    // 表示一个线程块最多可以同时处理几个batch，当然最少也要处理一个batch的一部分，最多处理64个
     int BATCHTHREADS =
         min(64, max(1, CUDA_NUM_THREADS / (PIXELTHREADS * KERNELTHREADS)));
     dim3 grid(
