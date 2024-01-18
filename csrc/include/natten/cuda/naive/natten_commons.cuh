@@ -319,16 +319,37 @@ inline __host__ __device__ int get_backward_window_end(
       : (index + (NEIGHBORHOOD_SIZE + 1) * dilation);
 }
 
+
+/*
+get_window_start(
+        si, p.height, KERNEL_SIZE_5, NEIGHBORHOOD_SIZE_5, dilation)
+        si, height, 5, 2, 1
+
+get_window_start(
+        sj, p.width, KERNEL_SIZE_5, NEIGHBORHOOD_SIZE_5, dilation)
+*/
+
 inline __host__ __device__ int get_window_start(
     const int index,
     const int length,
     const int KERNEL_SIZE,
     const int NEIGHBORHOOD_SIZE,
     const int dilation) {
+  /*
+    如果 dilation 小于等于 1，函数计算一个没有膨胀的邻域起始点。
+    这里使用 max 函数确保索引不会小于0，避免越界。
+    同时考虑了当邻域达到或超出数据长度时的边界情况。
+    计算得到单个维度上的正确左上角坐标  
+  */
   if (dilation <= 1)
     return max(index - NEIGHBORHOOD_SIZE, 0) +
         (index + NEIGHBORHOOD_SIZE >= length) *
         (length - index - NEIGHBORHOOD_SIZE - 1);
+
+  /*
+    计算邻域的起始索引，考虑到膨胀因子。膨胀会增加邻域内元素之间的间距。
+    暂且不考虑
+  */
   int ni = index - NEIGHBORHOOD_SIZE * dilation;
   if (ni < 0)
     return index % dilation;

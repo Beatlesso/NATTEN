@@ -26,39 +26,49 @@
 
 #pragma once
 
+// 核大小
 #define KERNEL_SIZE_13 13
 #define KERNEL_SIZE_11 11
 #define KERNEL_SIZE_9 9
 #define KERNEL_SIZE_7 7
 #define KERNEL_SIZE_5 5
 #define KERNEL_SIZE_3 3
+// 邻域大小
+// NEIGHBORHOOD_SIZE_7 为 3 意味着在 7x7 的核中，核心像素周围的 3 个像素（在每个方向上）被视为邻域
 #define NEIGHBORHOOD_SIZE_13 6
 #define NEIGHBORHOOD_SIZE_11 5
 #define NEIGHBORHOOD_SIZE_9 4
 #define NEIGHBORHOOD_SIZE_7 3
 #define NEIGHBORHOOD_SIZE_5 2
 #define NEIGHBORHOOD_SIZE_3 1
+
 // Always keep batchthreads 1, because we want each thread block to process one
 // 1 sample 1 head
+// 这些定义指出在处理每个样本或头时，每个线程块应使用的线程数量。
+// 这里，它们都被设为 1，意味着每个线程块处理一个样本和一个头。
 #define BATCHTHREADS_13 1
 #define BATCHTHREADS_11 1
 #define BATCHTHREADS_9 1
 #define BATCHTHREADS_7 1
 #define BATCHTHREADS_5 1
 #define BATCHTHREADS_3 1
+
 // Tile is the number of pixels across each axis that are processed within a
 // single threadblock So far the best tile size for Kernel size 7 is 3x3.
+// 在单个线程块内处理的像素数量。这是为了优化内存访问和计算效率。
+// 例如，TILE_7 为 3 意味着在处理 7x7 核时，每个线程块处理 3x3 的像素区域。
 #define TILE_9 3
 #define TILE_7 3
 #define TILE_5 4
 #define TILE_3 7
-
+// 其中TILE_11和TILE_13在X和Y上处理的长度不同，总的为 2x3 的像素区域
 #define TILE_11_X 2
 #define TILE_11_Y 3
 #define TILE_13_X 2
 #define TILE_13_Y 3
 // Each of the 3x3 pixels has 7x7 key neighbors in this case, therefore the tile
 // size for keys will 7 + 3 - 1 = 9x9
+// KTILE的大小是可以计算的，为 KERNEL_SIZE + TILE - 1
 #define KTILE_9 11
 #define KTILE_7 9
 #define KTILE_5 8
@@ -68,11 +78,15 @@
 #define KTILE_11_Y 13
 #define KTILE_13_X 14
 #define KTILE_13_Y 15
+
+
+
 // 7x7 kernel, and we want each threadblock to process the entire neighborhood
 // for each QUERY in its tile, so we'll have 7x7 * 3x3 = 21x21 Also keep in mind
 // these 21 threads are across each axis, so it's 21x21 threads total 21x21 =
 // 441 < 1024 Ensure it's less than 1024, which is the max number of threads per
 // threadblock
+// 这些宏定义了在处理特定核大小时，每个轴上线程的数量。它们用于确保线程块内的线程总数不超过 GPU 的限制。
 #define XYTHREADS_9 27
 #define XYTHREADS_7 21
 #define XYTHREADS_5 20
@@ -82,6 +96,7 @@
 #define YTHREADS_11 22
 #define XTHREADS_13 39
 #define YTHREADS_13 26
+
 
 // DIM is fixed at 32 for now
 #define DIM_32 32
@@ -99,6 +114,7 @@
 // For kernel size 5, we have to do 2 query dims per thread, because we have
 // fewer threads in each threadblock than the total number of queries. For
 // kernel size 3, we have to read 2 query dims per thread
+// 定义了处理不同核大小时，查询数据的迭代次数和步幅
 #define QITERS_5 2
 #define QSTRIDE_5 16
 #define QITERS_3 4

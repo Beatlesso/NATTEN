@@ -51,6 +51,7 @@ namespace naive {
 ///////////////////////////////////////////////////////////////////////////////
 
 /////////////// 5x5
+// DILATION是定义的时候需要的参数
 template <typename scalar_t, int DILATION>
 struct PointwiseNeighborhood2DFull5x5 : PointwiseNeighborhood2DBase<scalar_t> {
   using Base = PointwiseNeighborhood2DBase<scalar_t>;
@@ -66,38 +67,74 @@ struct PointwiseNeighborhood2DFull5x5 : PointwiseNeighborhood2DBase<scalar_t> {
   }
 
   __device__ void launch(Params p) {
+    // 如果 DILATION > 0 那么就用 DILATION的值，否则用Params中的值，dilation表示膨胀值
     const int dilation = (DILATION > 0) ? DILATION : p.dilation_in;
     // Because batch heads have stride 1 per threadblock, we can just use
-    // blockIdx since blockDim will be 1 and threadIdx will always be 0. const
-    // int z = blockIdx.z * blockDim.z + threadIdx.z;
+    // blockIdx since blockDim will be 1 and threadIdx will always be 0. 
+    // 因为批处理头每个线程块的步长为1，所以我们可以只使用blockIdx，因为blockDim将为1，而threadIdx将始终为0。
+    // const int z = blockIdx.z * blockDim.z + threadIdx.z;
     const int z = blockIdx.z;
     const int b = z / p.heads;
     const int h = z - b * p.heads;
+    // 即 z = b * p.heads + h
+    // 这里相当于获得了z对应的batch编号和head编号
+    /* 
+    const dim3 grid(  // 计算方法类似于 (dimension_size + threads_per_dimension * dilation - 1) / threads_per_dimension
+        (xsize + XTHREADS * dilation - 1) / XTHREADS,   // grid.x = (5 * width + 20 * dilation - 1) / 20
+        (ysize + YTHREADS * dilation - 1) / YTHREADS,   // grid.y = (5 * height + 20 * dilation - 1) / 20
+        (batch_dim + BATCHTHREADS - 1) / BATCHTHREADS); // grid.z = (batch_dim + 1 - 1) / 1
+    const dim3 block(XTHREADS, YTHREADS, BATCHTHREADS); // block = (20, 20, 1)      
+    */
+
     // Not needed again because it will always be true.
     // if (z < batch_size * heads)
     // {
+
+    // TILE_5 * KERNEL_SIZE_5 = 20
+    // block一行和一列都是20个元素，lti相当于线性化后的block下标
     const int lti = threadIdx.y * (TILE_5 * KERNEL_SIZE_5) + threadIdx.x;
+    // query_stride_0(dim * width * height * heads)
+    // query_stride_1(dim * width * height)
     const int64_t batchHeadOffset = b * p.query_stride_0 + h * p.query_stride_1;
+    // si 和 sj 分别代表当前处理的的行和列索引
+    // TILE对应线程块处理的query区域大小
+    // 假设dilation为1，即不考虑膨胀，那么：si = blockIdx.y * TILE，   sj = blockIdx.x * TILE
     const int si = int(blockIdx.y / dilation) * (TILE_5 * dilation) +
         (blockIdx.y % dilation);
     const int sj = int(blockIdx.x / dilation) * (TILE_5 * dilation) +
         (blockIdx.x % dilation);
+    // sni 和 snj 是调用 get_window_start 函数计算得到的邻域起始点。
+    // 暂且没有研究dilation的情况
     const int sni = get_window_start(
         si, p.height, KERNEL_SIZE_5, NEIGHBORHOOD_SIZE_5, dilation);
     const int snj = get_window_start(
         sj, p.width, KERNEL_SIZE_5, NEIGHBORHOOD_SIZE_5, dilation);
+    // 用于存储key和value的局部共享片
+    // 每个线程块要处理TILE_5 * TILE_5个query
     __shared__ scalar_t tile[TILE_5 * TILE_5][DIM_32 + 3];
+    // 对应需要 KTILE_5 * KTILE_5个key  8 = 4 + 2 + 2
     __shared__ scalar_t kTile[KTILE_5 * KTILE_5][DIM_32 + 3];
 
-    /* query tile */
+    /* 
+      query tile 
+      把query对应放到tile片中，以便快速访问
+    */
+    // qtx表示当前是第几个query
     const int qtx = lti / QSTRIDE_5;
+    // qty表示当前是query中的第几个维度
+    // 每个线程处理 QITERS_5 个维度，所以还需要乘上它
     const int qty = (lti - qtx * QSTRIDE_5) * QITERS_5;
     if (qtx < TILE_5 * TILE_5) {
+      // 此时qi表示当前query在窗口内的的行号
       int qi = qtx / TILE_5;
+      // (qtx - qi * TILE_5)表示当前query在窗口内的的列号
+      // 最后qj表示在整体上的列号
       const int qj = (qtx - qi * TILE_5) * dilation + sj;
+      // 同理计算qi在整体上的行号
       qi = qi * dilation + si;
       if (qi < p.height && qj < p.width) {
 #pragma unroll
+        // 将对应QITERS_5个数拷贝到共享内存中
         for (int ti = 0; ti < QITERS_5; ++ti)
           tile[qtx][qty + ti] = p.query
                                     [batchHeadOffset + qi * p.query_stride_2 +
@@ -105,6 +142,7 @@ struct PointwiseNeighborhood2DFull5x5 : PointwiseNeighborhood2DBase<scalar_t> {
       }
     }
     /* key tile */
+    
     const int ktx = lti / KSTRIDE_32;
     const int kty = (lti - ktx * KSTRIDE_32) * KITERS_32;
     if (ktx < KTILE_5 * KTILE_5) {
@@ -155,22 +193,32 @@ struct PointwiseNeighborhood2DFull5x5 : PointwiseNeighborhood2DBase<scalar_t> {
     //}
   }
 
+
+/*
+LaunchParams lp = Kernel5x5::get_launch_params(
+            batch_size * heads,
+            height,
+            width,
+            kernel_size * kernel_size,
+            dilation);
+*/
   static LaunchParams get_launch_params(
       int batch_dim,
       int height,
       int width,
       int attention_span,
       int dilation) {
-    int xsize = width * KERNEL_SIZE_5;
-    int ysize = height * KERNEL_SIZE_5;
-    int XTHREADS = XYTHREADS_5;
-    int YTHREADS = XYTHREADS_5;
-    int BATCHTHREADS = BATCHTHREADS_5;
-    const dim3 grid(
-        (xsize + XTHREADS * dilation - 1) / XTHREADS,
-        (ysize + YTHREADS * dilation - 1) / YTHREADS,
-        (batch_dim + BATCHTHREADS - 1) / BATCHTHREADS);
-    const dim3 block(XTHREADS, YTHREADS, BATCHTHREADS);
+    int xsize = width * KERNEL_SIZE_5; // 5 * width
+    int ysize = height * KERNEL_SIZE_5;// 5 * height
+    // 这些宏定义了在处理特定核大小时，每个轴上线程的数量，用于确保线程块内的线程总数不超过 GPU 的限制。
+    int XTHREADS = XYTHREADS_5;  // 20
+    int YTHREADS = XYTHREADS_5;  // 20
+    int BATCHTHREADS = BATCHTHREADS_5; // 1
+    const dim3 grid(  // 计算方法类似于 (dimension_size + threads_per_dimension * dilation - 1) / threads_per_dimension
+        (xsize + XTHREADS * dilation - 1) / XTHREADS,   // grid.x = (5 * width + 20 * dilation - 1) / 20
+        (ysize + YTHREADS * dilation - 1) / YTHREADS,   // grid.y = (5 * height + 20 * dilation - 1) / 20
+        (batch_dim + BATCHTHREADS - 1) / BATCHTHREADS); // grid.z = (batch_dim + 1 - 1) / 1
+    const dim3 block(XTHREADS, YTHREADS, BATCHTHREADS); // block = (20, 20, 1)
     return LaunchParams(grid, block);
   }
 };
@@ -284,6 +332,12 @@ struct PointwiseNeighborhood2DHalf5x5 : PointwiseNeighborhood2DBase<scalar_t> {
     //}
   }
 
+
+/*
+  batch_dim = batch_size * heads
+  spatial_size = height * width
+  attention_span = kernel_size * kernel_size
+*/
   static LaunchParams get_launch_params(
       int batch_dim,
       int height,

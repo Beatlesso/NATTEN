@@ -215,10 +215,16 @@ struct PointwiseNeighborhood2D {
       sizeof(scalar_t) >= 4,
       PointwiseNeighborhood2DFull3x3<scalar_t, DILATION>,
       PointwiseNeighborhood2DHalf3x3<scalar_t, DILATION>>::type;
+  /*
+    C++中的模板元编程语法
+    根据条件sizeof(scalar_t) >= 4的真假来选择两个不同的类型
+    并将选择的类型赋给Kernel5x5这个别名类型
+  */
   using Kernel5x5 = typename std::conditional<
       sizeof(scalar_t) >= 4,
       PointwiseNeighborhood2DFull5x5<scalar_t, DILATION>,
       PointwiseNeighborhood2DHalf5x5<scalar_t, DILATION>>::type;
+  //    
   using Kernel7x7 = typename std::conditional<
       sizeof(scalar_t) >= 4,
       PointwiseNeighborhood2DFull7x7<scalar_t, DILATION>,
@@ -281,14 +287,18 @@ struct PointwiseNeighborhood2D {
         launch_cuda_kernel<Kernel3x3><<<lp.grid, lp.block, 0, stream>>>(params);
         return;
       } else if (kernel_size == 5) {
+        // 启动核函数位置
         LaunchParams lp = Kernel5x5::get_launch_params(
             batch_size * heads,
             height,
             width,
             kernel_size * kernel_size,
             dilation);
+        // dim 固定32
         dim = Kernel5x5::get_dim(dim);
         auto params = Params(
+          // reinterpret_cast 运算符并不会改变括号中运算对象的值，而是对该对象从位模式上进行重新解释
+          // 这里相当于将query_ptr转成了scalar_t指针
             reinterpret_cast<scalar_t*>(query_ptr),
             reinterpret_cast<scalar_t*>(key_ptr),
             reinterpret_cast<scalar_t*>(attn_ptr),

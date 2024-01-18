@@ -141,6 +141,32 @@ struct PointwiseNeighborhood2DBase {
 
   __device__ __host__ PointwiseNeighborhood2DBase() {}
 
+
+    /*
+      LaunchParams lp = Kernel::get_launch_params(
+            batch_size * heads, height * width, kernel_size * kernel_size)
+
+      KERNELTHREADS = min(CUDA_NUM_THREADS, attention_span)
+      PIXELTHREADS = min(int(CUDA_NUM_THREADS / KERNELTHREADS), spatial_size)
+      BATCHTHREADS = min(64, max(1, CUDA_NUM_THREADS / (PIXELTHREADS * KERNELTHREADS)))
+
+      batch_dim = batch_size * heads
+      spatial_size = height * width
+      attention_span = kernel_size * kernel_size
+
+      而:      
+        block.x = max(threadIdx.x) = PIXELTHREADS
+        block.y = max(threadIdx.y) = KERNELTHREADS
+        block.z = max(threadIdx.z) = BATCHTHREADS
+        grid.x = max(blockIdx.x + 1) = (spatial_size + PIXELTHREADS - 1) / PIXELTHREADS
+        grid.y = max(blockIdx.y + 1) = (attention_span + KERNELTHREADS - 1) / KERNELTHREADS
+        grid.z = max(blockIdx.z + 1) = (batch_dim + BATCHTHREADS - 1) / BATCHTHREADS
+      所以：
+        grid.x 表示处理完 spatial_size 个query 需要多少线程块
+        grid.y 表示处理完 attention_span 需要多少线程块，应当固定为1，除非 kernel_size * kernel_size > 1024
+        grid.z 表示处理完 batch_dim  需要多少线程块
+    */
+
   static LaunchParams get_launch_params(
       int batch_dim,
       int spatial_size,
@@ -153,6 +179,9 @@ struct PointwiseNeighborhood2DBase {
     // 表示一个线程块最多可以同时处理几个batch，当然最少也要处理一个batch的一部分，最多处理64个
     int BATCHTHREADS =
         min(64, max(1, CUDA_NUM_THREADS / (PIXELTHREADS * KERNELTHREADS)));
+
+    // block的x，y，z分别用了PIXELTHREADS，KERNELTHREADS，BATCHTHREADS
+    // grid的x，y，z分别为spatial_size，attention_span，batch_dim与对应的block维度向上取整除的结果
     dim3 grid(
         (spatial_size + PIXELTHREADS - 1) / PIXELTHREADS,
         (attention_span + KERNELTHREADS - 1) / KERNELTHREADS,
